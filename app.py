@@ -15,7 +15,7 @@ from openai import OpenAI
 
 st.set_page_config(
     page_title="Devotional Songs",
-    page_icon="🎵",
+    page_icon="🕉️",
     layout="wide"
 )
 
@@ -946,7 +946,7 @@ def admin_dashboard():
     # ========================================================
 
     st.subheader(
-        "🎵 Manage Songs"
+        "🕉️ Manage Songs"
     )
 
     if not st.session_state.songs:
@@ -980,7 +980,7 @@ def admin_dashboard():
         )
 
         with st.expander(
-            f"🎵 {current_title}"
+            f"🕉️ {current_title}"
         ):
 
             st.write(
@@ -1273,7 +1273,7 @@ def show_song_details(song):
     # ========================================================
 
     st.title(
-        f"🎵 {song.get('title', 'Untitled')}"
+        f"🕉️ {song.get('title', 'Untitled')}"
     )
 
     # ========================================================
@@ -1391,7 +1391,7 @@ def show_song_details(song):
 def home_page():
 
     st.title(
-        "🎵 Devotional Songs"
+        "🕉️ Devotional Songs"
     )
 
     st.write(
@@ -1446,7 +1446,7 @@ def home_page():
     # ========================================================
 
     st.subheader(
-        "🎶 Songs"
+        "🙏 Songs"
     )
 
     if not filtered_songs:
@@ -1467,7 +1467,7 @@ def home_page():
         )
 
         if st.button(
-            f"🎵 {title}",
+            f"🕉️ {title}",
             key=f"song_{song_id}",
             use_container_width=True
         ):
@@ -1486,7 +1486,7 @@ def home_page():
 with st.sidebar:
 
     st.title(
-        "🎵 Devotional Songs"
+        "🕉️ Devotional Songs"
     )
 
     st.divider()
