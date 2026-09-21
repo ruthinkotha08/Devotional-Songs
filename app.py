@@ -1309,41 +1309,27 @@ def show_song_details(song):
     # Instead, lyrics are displayed as normal text.
     # ========================================================
 
-    safe_lyrics = html.escape(
-        lyrics
-    )
+safe_lyrics = html.escape(lyrics)
 
-    lyrics_box = f"""
+st.html(
+    f"""
     <div style="
         padding: 22px;
-        margin-top: 10px;
-        margin-bottom: 15px;
-
         border: 1px solid #d6d6d6;
         border-radius: 12px;
-
-        background-color: #ffffff;
+        background-color: white;
         color: #222222;
-
         font-size: 18px;
         line-height: 1.9;
-
         white-space: pre-wrap;
         word-wrap: break-word;
-
         overflow-x: auto;
-
         user-select: text;
     ">
-{safe_lyrics}
+        {safe_lyrics}
     </div>
     """
-
-    st.markdown(
-        lyrics_box,
-        unsafe_allow_html=True
-    )
-
+)
     # ========================================================
     # COPY BUTTON
     # ========================================================
