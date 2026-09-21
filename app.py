@@ -1,8 +1,8 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import json
-import uuid
 import html
+import uuid
 from datetime import datetime
 
 from supabase import create_client
@@ -15,7 +15,7 @@ from openai import OpenAI
 
 st.set_page_config(
     page_title="Devotional Songs",
-    page_icon="🕉️",
+    page_icon="🎵",
     layout="wide"
 )
 
@@ -36,11 +36,10 @@ LANGUAGES = {
 
 
 # ============================================================
-# SECRETS
+# STREAMLIT SECRETS
 # ============================================================
 
 try:
-
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
@@ -49,7 +48,7 @@ try:
     ADMIN_USERNAME = st.secrets["ADMIN_USERNAME"]
     ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
 
-except Exception:
+except Exception as e:
 
     st.error(
         """
@@ -69,7 +68,7 @@ except Exception:
 
 
 # ============================================================
-# CLIENTS
+# CREATE CLIENTS
 # ============================================================
 
 supabase = create_client(
@@ -189,6 +188,9 @@ def update_song(
         "title": title,
         "lyrics": lyrics,
         "cover_url": cover_url,
+
+        # Clear old translations because lyrics
+        # may have changed.
         "translations": {}
     }
 
@@ -327,6 +329,7 @@ def find_duplicate_song(
 
         song_id = song.get("id")
 
+        # Ignore the song currently being edited
         if (
             exclude_song_id is not None
             and int(song_id) == int(exclude_song_id)
@@ -359,11 +362,11 @@ def transliterate_lyrics(
     language
 ):
 
-    # English = original lyrics
+    # English should show original lyrics.
     if language == "English":
         return lyrics
 
-    instructions = {
+    language_instruction = {
 
         "Telugu": """
 Convert the lyrics into Telugu script.
@@ -405,13 +408,14 @@ Do NOT translate the meaning.
     prompt = f"""
 You are a devotional song script transliteration assistant.
 
-The user gives lyrics in English/Roman letters.
+The user provides lyrics written using English/Roman letters.
 
-Convert the SAME lyrics into {language} script.
+Your task is to convert the SAME lyrics into
+{language} script.
 
-{instructions.get(language, "")}
+{language_instruction.get(language, "")}
 
-IMPORTANT:
+IMPORTANT RULES:
 
 1. This is transliteration, NOT translation.
 2. Do not change the meaning.
@@ -445,7 +449,9 @@ Lyrics:
             input=prompt
         )
 
-        return response.output_text.strip()
+        result = response.output_text.strip()
+
+        return result
 
     except Exception as e:
 
@@ -470,7 +476,7 @@ def get_language_version(
         ""
     )
 
-    # English = original
+    # English = original lyrics
     if language == "English":
         return original_lyrics
 
@@ -482,14 +488,20 @@ def get_language_version(
         f"{song_id}_{language}"
     )
 
-    # Check session cache
+    # --------------------------------------------------------
+    # CHECK SESSION CACHE
+    # --------------------------------------------------------
+
     if cache_key in st.session_state.translation_cache:
 
         return st.session_state.translation_cache[
             cache_key
         ]
 
-    # Check database cache
+    # --------------------------------------------------------
+    # CHECK DATABASE CACHE
+    # --------------------------------------------------------
+
     translations = (
         song.get("translations")
         or {}
@@ -512,7 +524,10 @@ def get_language_version(
 
             return saved_translation
 
-    # Generate new translation
+    # --------------------------------------------------------
+    # GENERATE USING OPENAI
+    # --------------------------------------------------------
+
     with st.spinner(
         f"Converting lyrics to {language}..."
     ):
@@ -522,12 +537,18 @@ def get_language_version(
             language
         )
 
-    # Keep in current session
+    # --------------------------------------------------------
+    # SAVE IN CURRENT USER SESSION
+    # --------------------------------------------------------
+
     st.session_state.translation_cache[
         cache_key
     ] = converted
 
-    # Only admin saves generated translation
+    # --------------------------------------------------------
+    # ONLY ADMIN CAN SAVE TRANSLATION TO DATABASE
+    # --------------------------------------------------------
+
     if st.session_state.admin_logged_in:
 
         try:
@@ -564,26 +585,30 @@ def get_language_version(
 
 
 # ============================================================
-# COPY LYRICS
+# COPY LYRICS BUTTON
 # ============================================================
 
 def copy_button(text):
 
-    safe_text = json.dumps(text)
+    # Convert Python string safely to JavaScript string
+    safe_text = json.dumps(
+        text,
+        ensure_ascii=False
+    )
 
-    html_code = f"""
-    <div style="margin-top:12px;">
+    copy_html = f"""
+    <div>
 
         <button
             onclick="copyLyrics()"
             style="
-                padding:10px 18px;
-                border:none;
-                border-radius:8px;
-                cursor:pointer;
-                font-size:15px;
-                font-weight:bold;
-                background:#f0f0f0;
+                padding: 10px 18px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 15px;
+                font-weight: bold;
+                background-color: #f0f0f0;
             "
         >
             📋 Copy Lyrics
@@ -592,8 +617,8 @@ def copy_button(text):
         <span
             id="copyMessage"
             style="
-                margin-left:10px;
-                font-weight:bold;
+                margin-left: 10px;
+                font-weight: bold;
             "
         ></span>
 
@@ -601,26 +626,26 @@ def copy_button(text):
 
     <script>
 
-        const lyrics = {safe_text};
+        const lyricsText = {safe_text};
 
         async function copyLyrics() {{
 
             try {{
 
                 await navigator.clipboard.writeText(
-                    lyrics
+                    lyricsText
                 );
 
                 document.getElementById(
                     "copyMessage"
                 ).innerText = "✅ Copied!";
 
-            }} catch(error) {{
+            }} catch (error) {{
 
                 const textarea =
                     document.createElement("textarea");
 
-                textarea.value = lyrics;
+                textarea.value = lyricsText;
 
                 document.body.appendChild(
                     textarea
@@ -644,7 +669,7 @@ def copy_button(text):
     """
 
     components.html(
-        html_code,
+        copy_html,
         height=60
     )
 
@@ -698,7 +723,9 @@ def clear_song_translation_cache(
 
 def show_admin_login():
 
-    st.title("🔐 Admin Login")
+    st.title(
+        "🔐 Admin Login"
+    )
 
     st.write(
         "Only the administrator can manage songs."
@@ -767,7 +794,7 @@ def replace_existing_song(
     if result is None:
         return False
 
-    # Delete the old song
+    # Delete the song currently being edited
     delete_result = delete_song(
         old_song_id
     )
@@ -793,7 +820,9 @@ def replace_existing_song(
 
 def admin_dashboard():
 
-    st.title("📊 Admin Dashboard")
+    st.title(
+        "📊 Admin Dashboard"
+    )
 
     # ========================================================
     # LOGOUT
@@ -865,6 +894,7 @@ def admin_dashboard():
 
             else:
 
+                # Check duplicate
                 duplicate = find_duplicate_song(
                     title
                 )
@@ -916,7 +946,7 @@ def admin_dashboard():
     # ========================================================
 
     st.subheader(
-        "🕉️ Manage Songs"
+        "🎵 Manage Songs"
     )
 
     if not st.session_state.songs:
@@ -928,7 +958,7 @@ def admin_dashboard():
         return
 
     # ========================================================
-    # SONG LIST
+    # DISPLAY EVERY SONG
     # ========================================================
 
     for song in st.session_state.songs:
@@ -950,7 +980,7 @@ def admin_dashboard():
         )
 
         with st.expander(
-            f"🕉️ {current_title}"
+            f"🎵 {current_title}"
         ):
 
             st.write(
@@ -1034,7 +1064,7 @@ def admin_dashboard():
                         )
 
                         st.info(
-                            "What would you like to do?"
+                            "Choose one option:"
                         )
 
                         col1, col2 = st.columns(2)
@@ -1088,9 +1118,8 @@ def admin_dashboard():
                                     )
 
                                     st.success(
-                                        "✅ The existing song "
-                                        "has been replaced "
-                                        "with your edited version."
+                                        "✅ Existing song "
+                                        "replaced successfully."
                                     )
 
                                     st.rerun()
@@ -1226,7 +1255,7 @@ def admin_dashboard():
 def show_song_details(song):
 
     # ========================================================
-    # BACK BUTTON
+    # BACK TO SONGS
     # ========================================================
 
     if st.button(
@@ -1244,7 +1273,7 @@ def show_song_details(song):
     # ========================================================
 
     st.title(
-        f"🕉️ {song.get('title', 'Untitled')}"
+        f"🎵 {song.get('title', 'Untitled')}"
     )
 
     # ========================================================
@@ -1289,7 +1318,7 @@ def show_song_details(song):
     )
 
     # ========================================================
-    # LYRICS HEADING
+    # LYRICS TITLE
     # ========================================================
 
     st.subheader(
@@ -1297,39 +1326,47 @@ def show_song_details(song):
     )
 
     # ========================================================
-    # CLEAR LYRICS DISPLAY
+    # LYRICS DISPLAY
     # ========================================================
     #
     # IMPORTANT:
-    # We DO NOT use disabled=True here.
     #
-    # Disabled text areas become grey and show a
-    # blocked cursor.
+    # We do NOT use disabled st.text_area().
     #
-    # Instead, lyrics are displayed as normal text.
+    # We do NOT use st.code().
+    #
+    # We use st.html() so:
+    #
+    # - lyrics are clear
+    # - lyrics are black
+    # - lyrics are selectable
+    # - CSS is not shown as text
+    # - no blocked cursor appears
+    #
     # ========================================================
 
-safe_lyrics = html.escape(lyrics)
+    safe_lyrics = html.escape(
+        lyrics
+    )
 
-st.html(
-    f"""
-    <div style="
-        padding: 22px;
-        border: 1px solid #d6d6d6;
-        border-radius: 12px;
-        background-color: white;
-        color: #222222;
-        font-size: 18px;
-        line-height: 1.9;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        overflow-x: auto;
-        user-select: text;
-    ">
-        {safe_lyrics}
-    </div>
-    """
-)
+    st.html(
+        f"""
+        <div style="
+            padding: 22px;
+            border: 1px solid #d6d6d6;
+            border-radius: 12px;
+            background-color: #ffffff;
+            color: #222222;
+            font-size: 18px;
+            line-height: 1.9;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-x: auto;
+            user-select: text;
+        ">{safe_lyrics}</div>
+        """
+    )
+
     # ========================================================
     # COPY BUTTON
     # ========================================================
@@ -1341,8 +1378,8 @@ st.html(
     st.divider()
 
     st.caption(
-        "The lyrics are displayed in the selected "
-        "script while preserving the original wording "
+        "The lyrics are converted into the selected "
+        "script while preserving the original words "
         "and pronunciation as closely as possible."
     )
 
@@ -1354,7 +1391,7 @@ st.html(
 def home_page():
 
     st.title(
-        "🕉️ Devotional Songs"
+        "🎵 Devotional Songs"
     )
 
     st.write(
@@ -1365,7 +1402,7 @@ def home_page():
     st.divider()
 
     # ========================================================
-    # SEARCH
+    # SEARCH BOX
     # ========================================================
 
     search = st.text_input(
@@ -1409,7 +1446,7 @@ def home_page():
     # ========================================================
 
     st.subheader(
-        "🙏 Songs"
+        "🎶 Songs"
     )
 
     if not filtered_songs:
@@ -1430,7 +1467,7 @@ def home_page():
         )
 
         if st.button(
-            f"🕉️ {title}",
+            f"🎵 {title}",
             key=f"song_{song_id}",
             use_container_width=True
         ):
@@ -1449,13 +1486,13 @@ def home_page():
 with st.sidebar:
 
     st.title(
-        "🕉️ Devotional Songs"
+        "🎵 Devotional Songs"
     )
 
     st.divider()
 
     # ========================================================
-    # ADMIN SIDEBAR
+    # ADMIN
     # ========================================================
 
     if st.session_state.admin_logged_in:
@@ -1473,7 +1510,7 @@ with st.sidebar:
         )
 
     # ========================================================
-    # PUBLIC SIDEBAR
+    # PUBLIC USER
     # ========================================================
 
     else:
@@ -1498,7 +1535,7 @@ with st.sidebar:
 
 
 # ============================================================
-# LOAD SONGS
+# LOAD SONGS FROM SUPABASE
 # ============================================================
 
 st.session_state.songs = load_songs()
@@ -1530,7 +1567,7 @@ elif (
 
 
 # ------------------------------------------------------------
-# SELECTED SONG
+# SONG DETAILS
 # ------------------------------------------------------------
 
 elif (
