@@ -28,23 +28,7 @@ LANGUAGES = {
     "Tamil": "Tamil",
     "Kannada": "Kannada",
     "Malayalam": "Malayalam",
-    "Marathi": "Marathi",
-    "Bengali": "Bengali",
-    "Assamese": "Assamese",
-    "Gujarati": "Gujarati",
-    "Odia": "Odia",
-    "Punjabi": "Punjabi",
-    "Urdu": "Urdu",
     "Sanskrit": "Sanskrit",
-    "Konkani": "Konkani",
-    "Kashmiri": "Kashmiri",
-    "Sindhi": "Sindhi",
-    "Nepali": "Nepali",
-    "Maithili": "Maithili",
-    "Manipuri": "Manipuri",
-    "Bodo": "Bodo",
-    "Dogri": "Dogri",
-    "Santali": "Santali"
 }
 
 
