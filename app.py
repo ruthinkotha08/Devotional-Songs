@@ -43,7 +43,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
-    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
     ADMIN_USERNAME = st.secrets["ADMIN_USERNAME"]
     ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
