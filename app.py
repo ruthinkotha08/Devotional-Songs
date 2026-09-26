@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from supabase import create_client
-from openai import OpenAI
+from google import genai
 
 
 # ============================================================
