@@ -194,7 +194,7 @@ def update_song(
         "cover_url": cover_url,
 
         # Lyrics changed, so old translations
-        # are removed.
+        # must be removed.
         "translations": {}
     }
 
@@ -422,22 +422,24 @@ Do NOT translate the meaning.
     # --------------------------------------------------------
 
     prompt = f"""
-You are a devotional song transliteration assistant.
+You are a devotional song script transliteration assistant.
 
-Convert the following Roman/English-letter lyrics
-into {language} script.
+The user provides lyrics written using English/Roman letters.
+
+Your task is to convert the SAME lyrics into
+{language} script.
 
 {language_instruction.get(language, "")}
 
-IMPORTANT:
+IMPORTANT RULES:
 
-1. Transliteration only, NOT translation.
-2. Preserve the original words.
-3. Preserve pronunciation.
+1. This is transliteration, NOT translation.
+2. Do not change the meaning.
+3. Do not replace words with synonyms.
 4. Preserve deity names.
 5. Preserve devotional terms.
 6. Preserve repetitions.
-7. Preserve punctuation.
+7. Preserve punctuation where possible.
 8. Preserve every line break.
 9. Do not add explanations.
 10. Do not add headings.
@@ -449,34 +451,24 @@ Lyrics:
 """
 
 
-    # ========================================================
-    # FIRST REQUEST
-    # ========================================================
+    # --------------------------------------------------------
+    # FREE-TIER MODELS
+    # --------------------------------------------------------
 
-    try:
-
-        response = gemini_client.models.generate_content(
-            model="gemini-3.7-flash",
-            contents=prompt
-        )
-
-        if response.text:
-
-            return response.text.strip()
+    models = [
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite"
+    ]
 
 
-    except Exception as e:
+    # --------------------------------------------------------
+    # TRY EACH MODEL
+    # --------------------------------------------------------
 
-        error_text = str(e)
+    for model_name in models:
 
-
-        # ====================================================
-        # ONE QUICK RETRY FOR 503
-        # ====================================================
-
-        if "503" in error_text:
-
-            time.sleep(2)
+        # Maximum 3 attempts per model
+        for attempt in range(3):
 
             try:
 
@@ -484,55 +476,83 @@ Lyrics:
                     gemini_client
                     .models
                     .generate_content(
-                        model="gemini-3.7-flash",
+                        model=model_name,
                         contents=prompt
                     )
                 )
 
-                if response.text:
+                result = response.text
 
-                    return response.text.strip()
+                if result and result.strip():
 
-            except Exception:
-                pass
+                    return result.strip()
 
 
-        # ====================================================
-        # ONE QUICK RETRY FOR 429
-        # ====================================================
+                # Empty response
+                break
 
-        elif "429" in error_text:
 
-            time.sleep(2)
+            except Exception as e:
 
-            try:
+                error_text = str(e)
 
-                response = (
-                    gemini_client
-                    .models
-                    .generate_content(
-                        model="gemini-3.7-flash",
-                        contents=prompt
+                # ------------------------------------------------
+                # 503 TEMPORARY SERVER ERROR
+                # ------------------------------------------------
+
+                if "503" in error_text:
+
+                    # Exponential backoff:
+                    #
+                    # attempt 0 -> 2 seconds
+                    # attempt 1 -> 4 seconds
+                    # attempt 2 -> 8 seconds
+
+                    wait_time = 2 ** (
+                        attempt + 1
                     )
-                )
 
-                if response.text:
+                    time.sleep(
+                        wait_time
+                    )
 
-                    return response.text.strip()
-
-            except Exception:
-                pass
+                    continue
 
 
-    # ========================================================
-    # FAILED
-    # ========================================================
+                # ------------------------------------------------
+                # 429 RATE LIMIT
+                # ------------------------------------------------
+
+                if "429" in error_text:
+
+                    wait_time = 2 ** (
+                        attempt + 1
+                    )
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                    continue
+
+
+                # ------------------------------------------------
+                # OTHER ERROR
+                # ------------------------------------------------
+
+                break
+
+
+    # --------------------------------------------------------
+    # ALL MODELS FAILED
+    # --------------------------------------------------------
 
     st.warning(
-        "⚠️ Translation service is temporarily busy. "
-        "Please try again in a moment."
+        "⚠️ AI conversion is temporarily unavailable. "
+        "Please try again later."
     )
 
+    # Keep original lyrics instead of crashing.
     return lyrics
 
 
@@ -552,7 +572,7 @@ def get_language_version(
 
 
     # --------------------------------------------------------
-    # ENGLISH
+    # ENGLISH = ORIGINAL
     # --------------------------------------------------------
 
     if language == "English":
@@ -589,7 +609,6 @@ def get_language_version(
         or {}
     )
 
-
     if isinstance(
         translations,
         dict
@@ -598,7 +617,6 @@ def get_language_version(
         saved_translation = translations.get(
             language
         )
-
 
         if saved_translation:
 
@@ -624,7 +642,7 @@ def get_language_version(
 
 
     # --------------------------------------------------------
-    # SAVE IN SESSION CACHE
+    # SESSION CACHE
     # --------------------------------------------------------
 
     st.session_state.translation_cache[
@@ -633,7 +651,7 @@ def get_language_version(
 
 
     # --------------------------------------------------------
-    # ONLY ADMIN SAVES TO DATABASE
+    # ADMIN SAVES TRANSLATION
     # --------------------------------------------------------
 
     if st.session_state.admin_logged_in:
@@ -647,7 +665,6 @@ def get_language_version(
             new_translations[
                 language
             ] = converted
-
 
             (
                 supabase
@@ -663,13 +680,12 @@ def get_language_version(
                 .execute()
             )
 
-        except Exception:
+        except Exception as e:
 
             st.warning(
-                "Translation generated, "
+                "Translation was generated, "
                 "but could not be saved."
             )
-
 
     return converted
 
@@ -684,7 +700,6 @@ def copy_button(text):
         text,
         ensure_ascii=False
     )
-
 
     copy_html = f"""
     <div>
@@ -758,7 +773,6 @@ def copy_button(text):
     </script>
     """
 
-
     components.html(
         copy_html,
         height=60
@@ -790,7 +804,6 @@ def clear_song_translation_cache(
 
     prefix = f"{song_id}_"
 
-
     keys_to_remove = [
 
         key
@@ -801,7 +814,6 @@ def clear_song_translation_cache(
         if key.startswith(prefix)
 
     ]
-
 
     for key in keys_to_remove:
 
@@ -820,11 +832,9 @@ def show_admin_login():
         "🔐 Admin Login"
     )
 
-
     st.write(
         "Only the administrator can manage songs."
     )
-
 
     with st.form(
         "admin_login"
@@ -834,17 +844,14 @@ def show_admin_login():
             "Username"
         )
 
-
         password = st.text_input(
             "Password",
             type="password"
         )
 
-
         login = st.form_submit_button(
             "Login"
         )
-
 
         if login:
 
@@ -891,7 +898,6 @@ def replace_existing_song(
         cover_url
     )
 
-
     if result is None:
         return False
 
@@ -899,7 +905,6 @@ def replace_existing_song(
     delete_result = delete_song(
         old_song_id
     )
-
 
     if delete_result is None:
         return False
@@ -912,7 +917,6 @@ def replace_existing_song(
     clear_song_translation_cache(
         existing_song_id
     )
-
 
     return True
 
@@ -953,7 +957,6 @@ def admin_dashboard():
         "➕ Add New Song"
     )
 
-
     with st.form(
         "add_song_form"
     ):
@@ -963,7 +966,6 @@ def admin_dashboard():
             placeholder="Enter song name"
         )
 
-
         lyrics = st.text_area(
             "Lyrics",
             height=250,
@@ -971,7 +973,6 @@ def admin_dashboard():
                 "Enter lyrics in English/Roman letters..."
             )
         )
-
 
         cover = st.file_uploader(
             "Cover Image (Optional)",
@@ -982,7 +983,6 @@ def admin_dashboard():
             ],
             key="add_cover"
         )
-
 
         add_button = st.form_submit_button(
             "➕ Add Song"
@@ -1020,7 +1020,6 @@ def admin_dashboard():
                         f"already exists."
                     )
 
-
                     st.info(
                         "Please use a different song name."
                     )
@@ -1051,11 +1050,9 @@ def admin_dashboard():
                             "✅ Song added successfully!"
                         )
 
-
                         st.session_state.songs = (
                             load_songs()
                         )
-
 
                         st.rerun()
 
@@ -1089,18 +1086,15 @@ def admin_dashboard():
 
         song_id = song["id"]
 
-
         current_title = song.get(
             "title",
             ""
         )
 
-
         current_lyrics = song.get(
             "lyrics",
             ""
         )
-
 
         current_cover = song.get(
             "cover_url"
@@ -1194,12 +1188,10 @@ def admin_dashboard():
                             "already exists!"
                         )
 
-
                         st.write(
                             f"Existing song: "
                             f"**{duplicate.get('title')}**"
                         )
-
 
                         st.info(
                             "Choose one option:"
@@ -1236,7 +1228,6 @@ def admin_dashboard():
                                         )
                                     )
 
-
                                     if uploaded_url:
 
                                         cover_url = (
@@ -1261,12 +1252,10 @@ def admin_dashboard():
                                         load_songs()
                                     )
 
-
                                     st.success(
                                         "✅ Existing song "
                                         "replaced successfully."
                                     )
-
 
                                     st.rerun()
 
@@ -1309,7 +1298,6 @@ def admin_dashboard():
                                 new_cover
                             )
 
-
                             if uploaded_url:
 
                                 cover_url = uploaded_url
@@ -1329,16 +1317,13 @@ def admin_dashboard():
                                 song_id
                             )
 
-
                             st.session_state.songs = (
                                 load_songs()
                             )
 
-
                             st.success(
                                 "✅ Song updated successfully!"
                             )
-
 
                             st.rerun()
 
@@ -1353,7 +1338,6 @@ def admin_dashboard():
             st.markdown(
                 "### 🗑️ Delete Song"
             )
-
 
             st.warning(
                 "Deleting a song cannot be undone."
@@ -1409,7 +1393,6 @@ def admin_dashboard():
                         st.success(
                             "✅ Song deleted successfully!"
                         )
-
 
                         st.rerun()
 
@@ -1632,7 +1615,6 @@ def home_page():
 
         song_id = song["id"]
 
-
         title = song.get(
             "title",
             "Untitled Song"
@@ -1649,7 +1631,6 @@ def home_page():
                 song_id
             )
 
-
             st.rerun()
 
 
@@ -1662,7 +1643,6 @@ with st.sidebar:
     st.title(
         "🕉️ Devotional Songs"
     )
-
 
     st.divider()
 
