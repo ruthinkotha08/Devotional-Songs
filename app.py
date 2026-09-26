@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import json
 import html
 import uuid
+import time
 from datetime import datetime
 
 from supabase import create_client
@@ -43,10 +44,9 @@ try:
 
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
-except Exception as e:
+except Exception:
 
     st.error(
         """
@@ -193,8 +193,8 @@ def update_song(
         "lyrics": lyrics,
         "cover_url": cover_url,
 
-        # Clear old translations because lyrics
-        # may have changed.
+        # Lyrics changed, so old translations
+        # must be removed.
         "translations": {}
     }
 
@@ -333,7 +333,6 @@ def find_duplicate_song(
 
         song_id = song.get("id")
 
-        # Ignore the song currently being edited
         if (
             exclude_song_id is not None
             and int(song_id) == int(exclude_song_id)
@@ -366,9 +365,17 @@ def transliterate_lyrics(
     language
 ):
 
-    # English should show original lyrics.
+    # --------------------------------------------------------
+    # ENGLISH
+    # --------------------------------------------------------
+
     if language == "English":
         return lyrics
+
+
+    # --------------------------------------------------------
+    # LANGUAGE INSTRUCTIONS
+    # --------------------------------------------------------
 
     language_instruction = {
 
@@ -409,6 +416,11 @@ Do NOT translate the meaning.
 """
     }
 
+
+    # --------------------------------------------------------
+    # PROMPT
+    # --------------------------------------------------------
+
     prompt = f"""
 You are a devotional song script transliteration assistant.
 
@@ -433,45 +445,115 @@ IMPORTANT RULES:
 10. Do not add headings.
 11. Return ONLY the converted lyrics.
 
-Example:
-
-Input:
-Namaskaram andariki
-
-Telugu:
-నమస్కారం అందరికీ
-
 Lyrics:
 
 {lyrics}
 """
 
-    try:
 
-        response = gemini_client.models.generate_content(
-            model="gemini-3.7-flash",
-            contents=prompt
-        )
+    # --------------------------------------------------------
+    # FREE-TIER MODELS
+    # --------------------------------------------------------
 
-        result = response.text
+    models = [
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite"
+    ]
 
-        if result is None or not result.strip():
 
-            st.warning(
-                "Gemini did not return any text."
-            )
+    # --------------------------------------------------------
+    # TRY EACH MODEL
+    # --------------------------------------------------------
 
-            return lyrics
+    for model_name in models:
 
-        return result.strip()
+        # Maximum 3 attempts per model
+        for attempt in range(3):
 
-    except Exception as e:
+            try:
 
-        st.error(
-            f"AI conversion failed: {e}"
-        )
+                response = (
+                    gemini_client
+                    .models
+                    .generate_content(
+                        model=model_name,
+                        contents=prompt
+                    )
+                )
 
-        return lyrics
+                result = response.text
+
+                if result and result.strip():
+
+                    return result.strip()
+
+
+                # Empty response
+                break
+
+
+            except Exception as e:
+
+                error_text = str(e)
+
+                # ------------------------------------------------
+                # 503 TEMPORARY SERVER ERROR
+                # ------------------------------------------------
+
+                if "503" in error_text:
+
+                    # Exponential backoff:
+                    #
+                    # attempt 0 -> 2 seconds
+                    # attempt 1 -> 4 seconds
+                    # attempt 2 -> 8 seconds
+
+                    wait_time = 2 ** (
+                        attempt + 1
+                    )
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                    continue
+
+
+                # ------------------------------------------------
+                # 429 RATE LIMIT
+                # ------------------------------------------------
+
+                if "429" in error_text:
+
+                    wait_time = 2 ** (
+                        attempt + 1
+                    )
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                    continue
+
+
+                # ------------------------------------------------
+                # OTHER ERROR
+                # ------------------------------------------------
+
+                break
+
+
+    # --------------------------------------------------------
+    # ALL MODELS FAILED
+    # --------------------------------------------------------
+
+    st.warning(
+        "⚠️ AI conversion is temporarily unavailable. "
+        "Please try again later."
+    )
+
+    # Keep original lyrics instead of crashing.
+    return lyrics
 
 
 # ============================================================
@@ -488,9 +570,15 @@ def get_language_version(
         ""
     )
 
-    # English = original lyrics
+
+    # --------------------------------------------------------
+    # ENGLISH = ORIGINAL
+    # --------------------------------------------------------
+
     if language == "English":
+
         return original_lyrics
+
 
     song_id = str(
         song.get("id")
@@ -500,8 +588,9 @@ def get_language_version(
         f"{song_id}_{language}"
     )
 
+
     # --------------------------------------------------------
-    # CHECK SESSION CACHE
+    # SESSION CACHE
     # --------------------------------------------------------
 
     if cache_key in st.session_state.translation_cache:
@@ -510,8 +599,9 @@ def get_language_version(
             cache_key
         ]
 
+
     # --------------------------------------------------------
-    # CHECK DATABASE CACHE
+    # DATABASE CACHE
     # --------------------------------------------------------
 
     translations = (
@@ -536,6 +626,7 @@ def get_language_version(
 
             return saved_translation
 
+
     # --------------------------------------------------------
     # GENERATE USING GEMINI
     # --------------------------------------------------------
@@ -549,16 +640,18 @@ def get_language_version(
             language
         )
 
+
     # --------------------------------------------------------
-    # SAVE IN CURRENT USER SESSION
+    # SESSION CACHE
     # --------------------------------------------------------
 
     st.session_state.translation_cache[
         cache_key
     ] = converted
 
+
     # --------------------------------------------------------
-    # ONLY ADMIN CAN SAVE TRANSLATION TO DATABASE
+    # ADMIN SAVES TRANSLATION
     # --------------------------------------------------------
 
     if st.session_state.admin_logged_in:
@@ -590,7 +683,8 @@ def get_language_version(
         except Exception as e:
 
             st.warning(
-                f"Translation generated but could not be saved: {e}"
+                "Translation was generated, "
+                "but could not be saved."
             )
 
     return converted
@@ -602,7 +696,6 @@ def get_language_version(
 
 def copy_button(text):
 
-    # Convert Python string safely to JavaScript string
     safe_text = json.dumps(
         text,
         ensure_ascii=False
@@ -768,7 +861,10 @@ def show_admin_login():
             ):
 
                 st.session_state.admin_logged_in = True
-                st.session_state.show_admin_login = False
+
+                st.session_state.show_admin_login = (
+                    False
+                )
 
                 st.success(
                     "✅ Login successful!"
@@ -795,7 +891,6 @@ def replace_existing_song(
     cover_url
 ):
 
-    # Update the existing song
     result = update_song(
         existing_song_id,
         title,
@@ -806,7 +901,7 @@ def replace_existing_song(
     if result is None:
         return False
 
-    # Delete the song currently being edited
+
     delete_result = delete_song(
         old_song_id
     )
@@ -814,7 +909,7 @@ def replace_existing_song(
     if delete_result is None:
         return False
 
-    # Clear translation caches
+
     clear_song_translation_cache(
         old_song_id
     )
@@ -836,6 +931,7 @@ def admin_dashboard():
         "📊 Admin Dashboard"
     )
 
+
     # ========================================================
     # LOGOUT
     # ========================================================
@@ -849,7 +945,9 @@ def admin_dashboard():
 
         st.rerun()
 
+
     st.divider()
+
 
     # ========================================================
     # ADD NEW SONG
@@ -890,6 +988,7 @@ def admin_dashboard():
             "➕ Add Song"
         )
 
+
         if add_button:
 
             if not title.strip():
@@ -898,18 +997,20 @@ def admin_dashboard():
                     "Please enter the song name."
                 )
 
+
             elif not lyrics.strip():
 
                 st.error(
                     "Please enter the lyrics."
                 )
 
+
             else:
 
-                # Check duplicate
                 duplicate = find_duplicate_song(
                     title
                 )
+
 
                 if duplicate:
 
@@ -923,9 +1024,11 @@ def admin_dashboard():
                         "Please use a different song name."
                     )
 
+
                 else:
 
                     cover_url = None
+
 
                     if cover is not None:
 
@@ -933,11 +1036,13 @@ def admin_dashboard():
                             cover
                         )
 
+
                     result = add_song(
                         title.strip(),
                         lyrics.strip(),
                         cover_url
                     )
+
 
                     if result is not None:
 
@@ -951,7 +1056,9 @@ def admin_dashboard():
 
                         st.rerun()
 
+
     st.divider()
+
 
     # ========================================================
     # MANAGE SONGS
@@ -961,6 +1068,7 @@ def admin_dashboard():
         "🕉️ Manage Songs"
     )
 
+
     if not st.session_state.songs:
 
         st.info(
@@ -968,6 +1076,7 @@ def admin_dashboard():
         )
 
         return
+
 
     # ========================================================
     # DISPLAY EVERY SONG
@@ -991,6 +1100,7 @@ def admin_dashboard():
             "cover_url"
         )
 
+
         with st.expander(
             f"🕉️ {current_title}"
         ):
@@ -998,6 +1108,7 @@ def admin_dashboard():
             st.write(
                 f"**Song ID:** {song_id}"
             )
+
 
             # =================================================
             # EDIT SONG
@@ -1007,11 +1118,13 @@ def admin_dashboard():
                 "### ✏️ Edit Song"
             )
 
+
             edit_title = st.text_input(
                 "Song Name",
                 value=current_title,
                 key=f"edit_title_{song_id}"
             )
+
 
             edit_lyrics = st.text_area(
                 "Lyrics",
@@ -1019,6 +1132,7 @@ def admin_dashboard():
                 height=250,
                 key=f"edit_lyrics_{song_id}"
             )
+
 
             new_cover = st.file_uploader(
                 "New Cover Image (Optional)",
@@ -1029,6 +1143,7 @@ def admin_dashboard():
                 ],
                 key=f"new_cover_{song_id}"
             )
+
 
             # =================================================
             # SAVE CHANGES
@@ -1046,11 +1161,13 @@ def admin_dashboard():
                         "Song name cannot be empty."
                     )
 
+
                 elif not edit_lyrics.strip():
 
                     st.error(
                         "Lyrics cannot be empty."
                     )
+
 
                 else:
 
@@ -1058,6 +1175,7 @@ def admin_dashboard():
                         edit_title,
                         exclude_song_id=song_id
                     )
+
 
                     # =========================================
                     # DUPLICATE FOUND
@@ -1079,7 +1197,9 @@ def admin_dashboard():
                             "Choose one option:"
                         )
 
+
                         col1, col2 = st.columns(2)
+
 
                         # -------------------------------------
                         # REPLACE
@@ -1099,6 +1219,7 @@ def admin_dashboard():
 
                                 cover_url = current_cover
 
+
                                 if new_cover is not None:
 
                                     uploaded_url = (
@@ -1113,6 +1234,7 @@ def admin_dashboard():
                                             uploaded_url
                                         )
 
+
                                 success = (
                                     replace_existing_song(
                                         old_song_id=song_id,
@@ -1122,6 +1244,7 @@ def admin_dashboard():
                                         cover_url=cover_url
                                     )
                                 )
+
 
                                 if success:
 
@@ -1135,6 +1258,7 @@ def admin_dashboard():
                                     )
 
                                     st.rerun()
+
 
                         # -------------------------------------
                         # CHANGE NAME
@@ -1158,6 +1282,7 @@ def admin_dashboard():
                                     "'Save Changes' again."
                                 )
 
+
                     # =========================================
                     # NO DUPLICATE
                     # =========================================
@@ -1165,6 +1290,7 @@ def admin_dashboard():
                     else:
 
                         cover_url = current_cover
+
 
                         if new_cover is not None:
 
@@ -1176,12 +1302,14 @@ def admin_dashboard():
 
                                 cover_url = uploaded_url
 
+
                         result = update_song(
                             song_id,
                             edit_title.strip(),
                             edit_lyrics.strip(),
                             cover_url
                         )
+
 
                         if result is not None:
 
@@ -1199,7 +1327,9 @@ def admin_dashboard():
 
                             st.rerun()
 
+
             st.divider()
+
 
             # =================================================
             # DELETE SONG
@@ -1213,10 +1343,12 @@ def admin_dashboard():
                 "Deleting a song cannot be undone."
             )
 
+
             confirm_delete = st.checkbox(
                 "I understand that this song will be permanently deleted.",
                 key=f"confirm_delete_{song_id}"
             )
+
 
             if st.button(
                 "🗑️ Delete Song",
@@ -1230,17 +1362,20 @@ def admin_dashboard():
                         "Please confirm deletion first."
                     )
 
+
                 else:
 
                     result = delete_song(
                         song_id
                     )
 
+
                     if result is not None:
 
                         clear_song_translation_cache(
                             song_id
                         )
+
 
                         if (
                             st.session_state.selected_song_id
@@ -1249,9 +1384,11 @@ def admin_dashboard():
 
                             st.session_state.selected_song_id = None
 
+
                         st.session_state.songs = (
                             load_songs()
                         )
+
 
                         st.success(
                             "✅ Song deleted successfully!"
@@ -1278,7 +1415,9 @@ def show_song_details(song):
 
         st.rerun()
 
+
     st.divider()
+
 
     # ========================================================
     # SONG TITLE
@@ -1288,6 +1427,7 @@ def show_song_details(song):
         f"🕉️ {song.get('title', 'Untitled')}"
     )
 
+
     # ========================================================
     # COVER IMAGE
     # ========================================================
@@ -1295,6 +1435,7 @@ def show_song_details(song):
     cover_url = song.get(
         "cover_url"
     )
+
 
     if cover_url:
 
@@ -1308,6 +1449,7 @@ def show_song_details(song):
         except Exception:
             pass
 
+
     # ========================================================
     # LANGUAGE SELECTOR
     # ========================================================
@@ -1318,7 +1460,9 @@ def show_song_details(song):
         key=f"language_{song['id']}"
     )
 
+
     st.divider()
+
 
     # ========================================================
     # GET LYRICS
@@ -1329,6 +1473,7 @@ def show_song_details(song):
         language
     )
 
+
     # ========================================================
     # LYRICS TITLE
     # ========================================================
@@ -1337,6 +1482,7 @@ def show_song_details(song):
         f"📝 Lyrics — {language}"
     )
 
+
     # ========================================================
     # LYRICS DISPLAY
     # ========================================================
@@ -1344,6 +1490,7 @@ def show_song_details(song):
     safe_lyrics = html.escape(
         lyrics
     )
+
 
     st.html(
         f"""
@@ -1363,6 +1510,7 @@ def show_song_details(song):
         """
     )
 
+
     # ========================================================
     # COPY BUTTON
     # ========================================================
@@ -1371,7 +1519,9 @@ def show_song_details(song):
         lyrics
     )
 
+
     st.divider()
+
 
     st.caption(
         "The lyrics are converted into the selected "
@@ -1390,12 +1540,15 @@ def home_page():
         "🕉️ Devotional Songs"
     )
 
+
     st.write(
         "Search for a devotional song and click "
         "the song name to open it."
     )
 
+
     st.divider()
+
 
     # ========================================================
     # SEARCH BOX
@@ -1406,6 +1559,7 @@ def home_page():
         placeholder="Search by song name..."
     )
 
+
     # ========================================================
     # FILTER SONGS
     # ========================================================
@@ -1415,6 +1569,7 @@ def home_page():
         search_text = (
             search.strip().lower()
         )
+
 
         filtered_songs = [
 
@@ -1437,6 +1592,7 @@ def home_page():
             st.session_state.songs
         )
 
+
     # ========================================================
     # SONG LIST
     # ========================================================
@@ -1444,6 +1600,7 @@ def home_page():
     st.subheader(
         "🙏 Songs"
     )
+
 
     if not filtered_songs:
 
@@ -1453,6 +1610,7 @@ def home_page():
 
         return
 
+
     for song in filtered_songs:
 
         song_id = song["id"]
@@ -1461,6 +1619,7 @@ def home_page():
             "title",
             "Untitled Song"
         )
+
 
         if st.button(
             f"🕉️ {title}",
@@ -1487,6 +1646,7 @@ with st.sidebar:
 
     st.divider()
 
+
     # ========================================================
     # ADMIN
     # ========================================================
@@ -1497,6 +1657,7 @@ with st.sidebar:
             "👤 Admin logged in"
         )
 
+
         page = st.radio(
             "Menu",
             [
@@ -1504,6 +1665,7 @@ with st.sidebar:
                 "📊 Admin Dashboard"
             ]
         )
+
 
     # ========================================================
     # PUBLIC USER
@@ -1518,7 +1680,9 @@ with st.sidebar:
             ]
         )
 
+
         st.divider()
+
 
         if st.button(
             "🔐 Admin Login",
@@ -1575,11 +1739,13 @@ elif (
         st.session_state.selected_song_id
     )
 
+
     if selected_song:
 
         show_song_details(
             selected_song
         )
+
 
     else:
 
