@@ -40,13 +40,11 @@ LANGUAGES = {
 # ============================================================
 
 try:
+
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-
-    ADMIN_USERNAME = st.secrets["ADMIN_USERNAME"]
-    ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
 
 except Exception as e:
 
@@ -58,13 +56,19 @@ except Exception as e:
 
         SUPABASE_URL
         SUPABASE_KEY
-        OPENAI_API_KEY
-        ADMIN_USERNAME
-        ADMIN_PASSWORD
+        GEMINI_API_KEY
         """
     )
 
     st.stop()
+
+
+# ============================================================
+# ADMIN LOGIN
+# ============================================================
+
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "Swarajyam@2014"
 
 
 # ============================================================
@@ -76,8 +80,8 @@ supabase = create_client(
     SUPABASE_KEY
 )
 
-openai_client = OpenAI(
-    api_key=OPENAI_API_KEY
+gemini_client = genai.Client(
+    api_key=GEMINI_API_KEY
 )
 
 
@@ -354,7 +358,7 @@ def find_duplicate_song(
 
 
 # ============================================================
-# OPENAI TRANSLITERATION
+# GEMINI TRANSLITERATION
 # ============================================================
 
 def transliterate_lyrics(
@@ -444,14 +448,22 @@ Lyrics:
 
     try:
 
-        response = openai_client.responses.create(
-            model="gpt-5.6-luna",
-            input=prompt
+        response = gemini_client.models.generate_content(
+            model="gemini-3.7-flash",
+            contents=prompt
         )
 
-        result = response.output_text.strip()
+        result = response.text
 
-        return result
+        if result is None or not result.strip():
+
+            st.warning(
+                "Gemini did not return any text."
+            )
+
+            return lyrics
+
+        return result.strip()
 
     except Exception as e:
 
@@ -525,7 +537,7 @@ def get_language_version(
             return saved_translation
 
     # --------------------------------------------------------
-    # GENERATE USING OPENAI
+    # GENERATE USING GEMINI
     # --------------------------------------------------------
 
     with st.spinner(
@@ -1327,22 +1339,6 @@ def show_song_details(song):
 
     # ========================================================
     # LYRICS DISPLAY
-    # ========================================================
-    #
-    # IMPORTANT:
-    #
-    # We do NOT use disabled st.text_area().
-    #
-    # We do NOT use st.code().
-    #
-    # We use st.html() so:
-    #
-    # - lyrics are clear
-    # - lyrics are black
-    # - lyrics are selectable
-    # - CSS is not shown as text
-    # - no blocked cursor appears
-    #
     # ========================================================
 
     safe_lyrics = html.escape(
